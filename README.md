@@ -1,21 +1,23 @@
-# Lebanon Education Atlas
+# Education in Lebanese towns and villages
 
-An interactive Streamlit companion to the MSBA325 Plotly assignment. It asks one question:
-**do school counts explain illiteracy in Lebanon, and does the answer change with how closely you look?**
+A Streamlit dashboard for the MSBA325 assignment. It shows how illiteracy, school dropout, schools and
+universities differ between Lebanon's governorates, districts and towns.
 
 **Live app:** _add the Streamlit Community Cloud link here after deploying_
 
-## What it does
-- Two **linked** filters: choose governorates, and the district list narrows to districts inside them.
-  Districts that stop being valid are dropped automatically.
-- Three coordinated views: a governorate choropleth, a ranked bar chart that drills from
-  governorates to districts to individual towns, and a schools-vs-illiteracy scatter with a live correlation.
-- Design justifications for both filters are on the page (Design notes).
+## How it works
+- Two linked filters in the sidebar. Choose governorates and the district list narrows to districts inside them;
+  districts that no longer belong to the selection are dropped automatically.
+- The charts go one step deeper as you narrow the selection: governorates, then districts, then individual towns.
+- Views: a map and a ranking of illiteracy, illiteracy against school dropout, and public and private schools.
+- The design reasoning for both filters is on the page under "Design notes".
 
 ## Data
-Two RDF Data Cubes from the AUB linked-data portal (PKGCubes Publisher), `Educational_Level-Lebanon-2023` and
-`Educational_Resources-Lebanon-2023` (published by Impact Open Data), joined on town. Cleaning is documented in
-`data.py` and summarised at the bottom of the page. Boundary shapes come from geoBoundaries and carry no data.
+Two datasets from the AUB linked-data portal (PKGCubes Publisher), `Educational_Level-Lebanon-2023` and
+`Educational_Resources-Lebanon-2023`, joined by town. They come from the Rural Development module of the IMPACT
+platform (Central Inspection, Lebanon), where municipalities report town-level indicators, so the figures are
+approximate. Cleaning is in `data.py` and summarised at the bottom of the page. The "public school coverage index"
+column is not used because its definition is unclear. Boundary shapes come from geoBoundaries and carry no data.
 
 ## Run locally
 ```bash
@@ -26,8 +28,8 @@ streamlit run app.py
 ## Files
 | File | Purpose |
 |---|---|
-| `app.py` | Page layout, widgets and linking logic |
-| `data.py` | Loading, cleaning, joining; drill-down and statistics helpers |
-| `charts.py` | The three Plotly figures |
-| `theme.py` | Colours and CSS (single source of truth for the look) |
+| `app.py` | Page layout, filters and text |
+| `data.py` | Loading, cleaning, joining and the drill-down table |
+| `charts.py` | The four Plotly figures |
+| `theme.py` | Chart colours |
 | `data/` | The two portal exports and the boundary GeoJSON |

@@ -1,42 +1,54 @@
-"""Plotly figures. Colour comes only from theme.py; no chart invents its own."""
+"""Plotly figures. Every chart draws from the same units table, so they always agree."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 
-from data import SHAPE_TO_GOV, corr
-from theme import (BLUE, CARD, CONTEXT, FONT, GRID, MUTED, NO_DATA, ORANGE,
-                   SEQUENTIAL, SURFACE, TEXT, TEXT_2)
+from theme import BLUE, GRID, NO_DATA, ORANGE, SEQUENTIAL, TEXT, TEXT_2, WHITE
 
-# Fixed colour range so a governorate keeps its colour whatever the filter does
-Z_MIN, Z_MAX = 3, 10
+Z_MIN, Z_MAX = 3, 10   # fixed colour range: a governorate keeps its colour whatever the filter does
+TOP_N = 15             # rows shown when the chart drills down to individual towns
 
 
 def _style(fig: go.Figure, height: int) -> go.Figure:
     fig.update_layout(
-        height=height,
-        margin=dict(l=4, r=4, t=6, b=4),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family=FONT, size=13, color=TEXT_2),
-        hoverlabel=dict(bgcolor=CARD, bordercolor=GRID, font=dict(family=FONT, size=13, color=TEXT)),
-        showlegend=False,
+        height=height, margin=dict(l=4, r=4, t=8, b=4),
+        paper_bgcolor=WHITE, plot_bgcolor=WHITE,
+        font=dict(size=13, color=TEXT_2), showlegend=False,
+        hoverlabel=dict(bgcolor=WHITE, font=dict(color=TEXT)),
     )
     return fig
 
 
+def _top(units: pd.DataFrame, level: str) -> pd.DataFrame:
+    """Rows drawn as bars: everything, or the TOP_N towns; ordered so the largest sits on top."""
+    rows = units.head(TOP_N) if level == "town" else units
+    return rows.iloc[::-1]
+
+
+def _gap(n: int) -> float:
+    """Bar gap that keeps bars a sensible thickness whether there are 2 rows or 15."""
+    return 0.35 if n >= 6 else 0.55 if n >= 3 else 0.75
+
+
+def _names(rows: pd.DataFrame, level: str) -> list[str]:
+    if level == "town":
+        return [f"{a} ({b})" for a, b in zip(rows["label"], rows["context"])]
+    return [f"{a} ({n} towns)" for a, n in zip(rows["label"], rows["n"])]
+
+
 def map_fig(sel: pd.DataFrame, geojson: dict, shape_to_gov: dict) -> go.Figure:
-    """Governorate choropleth of the *current selection*; the rest stays grey for context."""
+    """Average illiteracy by governorate for the towns in view; governorates outside the selection stay grey."""
     stats = sel.groupby("governorate")["illiterate"].agg(["mean", "count"])
     shapes = [f["id"] for f in geojson["features"]]
-    line = dict(color=SURFACE, width=1.4)
+    edge = dict(color=WHITE, width=1.2)
 
     fig = go.Figure()
     fig.add_trace(go.Choropleth(
         geojson=geojson, featureidkey="id", locations=shapes, z=[0] * len(shapes),
-        colorscale=[[0, NO_DATA], [1, NO_DATA]], showscale=False, marker=dict(line=line),
-        text=["No town-level data (urban governorate)" if shape_to_gov[s] == "Beirut" else "Outside current selection" for s in shapes],
+        colorscale=[[0, NO_DATA], [1, NO_DATA]], showscale=False, marker=dict(line=edge),
+        text=["No data for Beirut" if shape_to_gov[s] == "Beirut" else "Not in selection" for s in shapes],
         customdata=[shape_to_gov[s] for s in shapes],
         hovertemplate="<b>%{customdata}</b><br>%{text}<extra></extra>",
     ))
@@ -48,79 +60,69 @@ def map_fig(sel: pd.DataFrame, geojson: dict, shape_to_gov: dict) -> go.Figure:
             z=[stats.loc[g, "mean"] for g in govs],
             customdata=np.c_[govs, [int(stats.loc[g, "count"]) for g in govs]],
             colorscale=[[i / (len(SEQUENTIAL) - 1), c] for i, c in enumerate(SEQUENTIAL)],
-            zmin=Z_MIN, zmax=Z_MAX, marker=dict(line=line),
+            zmin=Z_MIN, zmax=Z_MAX, marker=dict(line=edge),
             hovertemplate="<b>%{customdata[0]}</b><br>%{z:.1f}% illiterate<br>%{customdata[1]} towns<extra></extra>",
-            colorbar=dict(title=dict(text="% illiterate", font=dict(size=12, color=TEXT_2)),
-                          thickness=10, len=0.55, x=1.0, outlinewidth=0,
-                          tickfont=dict(size=11, color=TEXT_2), ticksuffix="%"),
+            colorbar=dict(title=dict(text="% illiterate", font=dict(size=12)), thickness=12, len=0.6,
+                          outlinewidth=0, tickfont=dict(size=11), ticksuffix="%"),
         ))
-    fig.update_geos(fitbounds="locations", visible=False, projection_type="mercator", bgcolor="rgba(0,0,0,0)")
-    return _style(fig, 470)
+    fig.update_geos(fitbounds="locations", visible=False, projection_type="mercator", bgcolor=WHITE)
+    return _style(fig, 430)
 
 
-def bar_fig(table: pd.DataFrame, level: str) -> go.Figure:
-    """Ranked horizontal bars with standard-error whiskers and a direct value label."""
-    t = table.copy()
-    if level == "town":
-        ylabels = [f"{a}  ·  {b}" for a, b in zip(t["label"], t["context"])]
-        hover = "<b>%{y}</b><br>%{x:.1f}% illiterate<extra></extra>"
-    else:
-        ylabels = [f"{a}  (n={n})" for a, n in zip(t["label"], t["n"])]
-        hover = "<b>%{y}</b><br>%{x:.1f}% illiterate ± %{error_x.array:.1f}<extra></extra>"
+def ranking_fig(units: pd.DataFrame, level: str) -> go.Figure:
+    rows = _top(units, level)
+    names = _names(rows, level)
+    fig = go.Figure(go.Bar(
+        x=rows["illiterate"], y=names, orientation="h", marker=dict(color=BLUE),
+        text=[f"{v:.1f}%" for v in rows["illiterate"]], textposition="outside", cliponaxis=False,
+        hovertemplate="<b>%{y}</b><br>%{x:.1f}% illiterate<extra></extra>",
+    ))
+    fig.update_xaxes(range=[0, max(rows["illiterate"].max() * 1.2, 1)], gridcolor=GRID, ticksuffix="%", zeroline=False)
+    fig.update_yaxes(automargin=True, tickfont=dict(color=TEXT))
+    fig.update_layout(bargap=_gap(len(rows)))
+    return _style(fig, 430)
 
+
+def dropout_fig(units: pd.DataFrame, level: str) -> go.Figure:
+    """Illiteracy against school dropout: one dot per governorate, district or town."""
+    d = units.dropna(subset=["dropout"])
+    # name every dot when there are few; otherwise only the highest-illiteracy ones (labels would collide)
+    named = set(d.index) if len(d) <= 7 else set(d.nlargest(3, "illiterate").index)
+    labels = [name if (level != "town" and i in named) else "" for i, name in zip(d.index, d["label"])]
+    fig = go.Figure(go.Scatter(
+        x=d["illiterate"], y=d["dropout"], mode="markers+text",
+        text=labels, textposition="top center", textfont=dict(size=12, color=TEXT),
+        marker=dict(size=13 if level != "town" else 8, color=BLUE, opacity=0.85 if level != "town" else 0.55,
+                    line=dict(color=WHITE, width=1)),
+        customdata=np.c_[d["label"], d["n"]],
+        hovertemplate="<b>%{customdata[0]}</b><br>%{x:.1f}% illiterate<br>%{y:.1f}% dropout<extra></extra>",
+    ))
+    # leave room either side so point labels are never cut off
+    x_pad = max((d["illiterate"].max() - d["illiterate"].min()) * 0.22, 1)
+    y_pad = max((d["dropout"].max() - d["dropout"].min()) * 0.15, 0.5)
+    fig.update_xaxes(title="Illiterate residents (%)", gridcolor=GRID, zeroline=False, ticksuffix="%",
+                     range=[max(d["illiterate"].min() - x_pad, 0), d["illiterate"].max() + x_pad])
+    fig.update_yaxes(title="School dropout (%)", gridcolor=GRID, zeroline=False, ticksuffix="%",
+                     range=[max(d["dropout"].min() - y_pad, 0), d["dropout"].max() + y_pad])
+    return _style(fig, 400)
+
+
+def schools_fig(units: pd.DataFrame, level: str) -> go.Figure:
+    """Public and private schools, in the same order as the ranking chart."""
+    rows = _top(units, level)
+    names = _names(rows, level)
+    per = "per town, on average" if level != "town" else "in the town"
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=t["mean"], y=ylabels, orientation="h", marker=dict(color=BLUE, cornerradius=4),
-        error_x=dict(type="data", array=t["se"], color=TEXT_2, thickness=1.4, width=4),
-        hovertemplate=hover,
-    ))
-    reach = (t["mean"] + t["se"])
-    fig.add_trace(go.Scatter(
-        x=reach, y=ylabels, mode="text", text=[f"   {m:.1f}%" for m in t["mean"]],
-        textposition="middle right", textfont=dict(color=TEXT, size=13), hoverinfo="skip",
-    ))
-    fig.update_xaxes(range=[0, max(reach.max() * 1.32, 1)], gridcolor=GRID, zeroline=False,
-                     ticksuffix="%", tickfont=dict(color=MUTED))
-    fig.update_yaxes(tickfont=dict(color=TEXT_2, size=12), automargin=True)
-    fig.update_layout(bargap=0.38)
-    return _style(fig, 470)
-
-
-def scatter_fig(towns: pd.DataFrame, sel: pd.DataFrame) -> go.Figure:
-    """Every town stays on the chart; the selection is drawn in colour, the rest recedes."""
-    rng = np.random.default_rng(7)
-    jitter = lambda d: d["schools"] + rng.uniform(-0.18, 0.18, len(d))  # integer counts overplot badly
-
-    def hover(d):
-        return np.c_[d["town"], d["district"], d["governorate"], d["schools"], d["illiterate"]]
-
-    tmpl = ("<b>%{customdata[0]}</b><br>%{customdata[1]} · %{customdata[2]}"
-            "<br>Schools: %{customdata[3]}<br>Illiterate: %{customdata[4]:.0f}%<extra></extra>")
-
-    fig = go.Figure()
-    rest = towns[~towns.index.isin(sel.index)]
-    if len(rest):
-        fig.add_trace(go.Scatter(
-            x=jitter(rest), y=rest["illiterate"], mode="markers", name="Other towns",
-            marker=dict(size=7, color=CONTEXT, opacity=0.4), customdata=hover(rest), hovertemplate=tmpl,
-        ))
-    fig.add_trace(go.Scatter(
-        x=jitter(sel), y=sel["illiterate"], mode="markers", name="Selected towns",
-        marker=dict(size=9, color=BLUE, opacity=0.85, line=dict(color=SURFACE, width=1.2)),
-        customdata=hover(sel), hovertemplate=tmpl,
-    ))
-    r = corr(sel["schools"], sel["illiterate"])
-    if not np.isnan(r):
-        slope, intercept = np.polyfit(sel["schools"], sel["illiterate"], 1)
-        xs = np.array([sel["schools"].min(), sel["schools"].max()])
-        fig.add_trace(go.Scatter(
-            x=xs, y=intercept + slope * xs, mode="lines", name="Trend (selected)",
-            line=dict(color=ORANGE, width=2.5), hoverinfo="skip",
-        ))
-    fig.update_xaxes(title=dict(text="Schools in town (public + private)", font=dict(color=TEXT_2)),
-                     gridcolor=GRID, zeroline=False, tickfont=dict(color=MUTED))
-    fig.update_yaxes(title=dict(text="% of residents illiterate", font=dict(color=TEXT_2)),
-                     gridcolor=GRID, zeroline=False, ticksuffix="%", tickfont=dict(color=MUTED))
-    _style(fig, 480)
-    fig.update_layout(showlegend=True, legend=dict(orientation="h", y=1.08, x=0, font=dict(color=TEXT_2, size=12)))
+    fig.add_trace(go.Bar(x=rows["public"], y=names, orientation="h", name="Public", marker=dict(color=BLUE),
+                         hovertemplate="<b>%{y}</b><br>%{x:.1f} public schools<extra></extra>"))
+    fig.add_trace(go.Bar(x=rows["private"], y=names, orientation="h", name="Private", marker=dict(color=ORANGE),
+                         hovertemplate="<b>%{y}</b><br>%{x:.1f} private schools<extra></extra>"))
+    total = rows["public"] + rows["private"]
+    fig.add_trace(go.Scatter(x=total, y=names, mode="text", text=[f"  {v:.1f}" for v in total],
+                             textposition="middle right", textfont=dict(color=TEXT), hoverinfo="skip", showlegend=False))
+    fig.update_xaxes(title=f"Schools {per}", range=[0, max(total.max() * 1.18, 1)], gridcolor=GRID, zeroline=False)
+    fig.update_yaxes(automargin=True, tickfont=dict(color=TEXT))
+    fig.update_layout(barmode="stack", bargap=_gap(len(rows)))
+    _style(fig, 400)
+    fig.update_layout(showlegend=True, legend=dict(orientation="h", y=1.07, x=0, traceorder="normal"))
     return fig

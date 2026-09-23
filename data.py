@@ -4,7 +4,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -58,6 +57,7 @@ def load_towns() -> tuple[pd.DataFrame, dict]:
             "town": lvl["Town"],
             "governorate": lvl["refArea Governorate"].map(lambda u: _label(u, ("Governorate", "page/"))),
             "district": lvl["refArea District"].map(lambda u: _label(u, (" District", ", Lebanon"))),
+            "dropout": lvl["PercentageofSchooldropout"],
             **{c: lvl[c] for c in LEVELS},
         }
     )
@@ -96,9 +96,11 @@ def load_towns() -> tuple[pd.DataFrame, dict]:
         }
     )
     res["schools"] = res["public_schools"] + res["private_schools"]
-    df = df.merge(res[["town", "schools", "universities"]], on="town", how="left")
+    df = df.merge(res[["town", "schools", "public_schools", "private_schools", "universities"]], on="town", how="left")
     audit["unmatched"] = int(df["schools"].isna().sum())
     audit["final"] = len(df)
+    reported = df[LEVELS].stack()
+    audit["round5"] = float((reported % 5 == 0).mean())   # share of reported percentages that are multiples of 5
 
     return df.reset_index(drop=True), audit
 
@@ -130,25 +132,7 @@ def load_geojson() -> dict:
     return gj
 
 
-# ---------------------------------------------------------------- statistics
-def corr(x: pd.Series, y: pd.Series, min_n: int = 8) -> float:
-    """Pearson r, or NaN when there are too few towns or no variation."""
-    pair = pd.concat([x, y], axis=1).dropna()
-    if len(pair) < min_n or pair.iloc[:, 0].std() == 0 or pair.iloc[:, 1].std() == 0:
-        return float("nan")
-    return float(np.corrcoef(pair.iloc[:, 0], pair.iloc[:, 1])[0, 1])
-
-
-def describe_r(r: float, n: int) -> str:
-    if np.isnan(r):
-        return f"Too few towns ({n}) for a meaningful correlation"
-    size = abs(r)
-    strength = "no relationship" if size < 0.1 else "a weak" if size < 0.3 else "a moderate" if size < 0.5 else "a strong"
-    if size < 0.1:
-        return "no relationship"
-    return f"{strength} {'positive' if r > 0 else 'negative'} relationship"
-
-
+# ------------------------------------------------------------------- selection
 def districts_for(towns: pd.DataFrame, governorates: list[str]) -> list[str]:
     scope = towns[towns["governorate"].isin(governorates)] if governorates else towns
     return sorted(scope["district"].unique())
@@ -163,19 +147,26 @@ def filter_towns(towns: pd.DataFrame, governorates: list[str], districts: list[s
     return out
 
 
-def drill_table(sel: pd.DataFrame, governorates: list[str], districts: list[str], top_n: int = 15):
-    """Rows for the ranked bar chart, one level below the current selection.
+def level_of(governorates: list[str], districts: list[str]) -> str:
+    """Grain shown in the charts: one step below whatever the reader has selected."""
+    return "town" if districts else "district" if governorates else "governorate"
 
-    nothing picked        -> governorates
-    governorate(s) picked -> districts inside them
-    district(s) picked    -> the individual towns (top_n by illiteracy)
+
+def units_table(sel: pd.DataFrame, level: str) -> pd.DataFrame:
+    """One row per governorate / district / town in the selection, sorted by illiteracy.
+
+    Governorate and district rows are averages of their towns' figures; town rows are the raw figures.
     """
-    if districts:
-        t = sel.nlargest(top_n, "illiterate")
-        out = pd.DataFrame({"label": t["town"], "mean": t["illiterate"], "se": 0.0, "n": 1, "context": t["district"]})
-        return out.sort_values("mean"), "town", len(sel)
-    key = "district" if governorates else "governorate"
-    g = sel.groupby(key)["illiterate"].agg(mean="mean", std="std", n="count").reset_index()
-    g["se"] = (g["std"] / np.sqrt(g["n"])).fillna(0.0)
-    out = g.rename(columns={key: "label"}).assign(context="")
-    return out[["label", "mean", "se", "n", "context"]].sort_values("mean"), key, len(g)
+    cols = {"illiterate": "illiterate", "dropout": "dropout", "university": "university",
+            "public_schools": "public", "private_schools": "private"}
+    if level == "town":
+        t = sel.rename(columns=cols)
+        out = t[["town", "district", "illiterate", "dropout", "university", "public", "private", "universities"]].copy()
+        out = out.rename(columns={"town": "label", "district": "context"})
+        out["n"] = 1
+    else:
+        g = sel.groupby(level).agg(n=("town", "count"), illiterate=("illiterate", "mean"), dropout=("dropout", "mean"),
+                                   university=("university", "mean"), public=("public_schools", "mean"),
+                                   private=("private_schools", "mean"), universities=("universities", "sum")).reset_index()
+        out = g.rename(columns={level: "label"}).assign(context="")
+    return out.sort_values("illiterate", ascending=False).reset_index(drop=True)

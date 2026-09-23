@@ -1,197 +1,162 @@
-"""Lebanon Education Atlas: an interactive companion to the MSBA325 Plotly assignment."""
-import numpy as np
+"""Education in Lebanese towns and villages: interactive companion to the MSBA325 Plotly assignment."""
 import streamlit as st
 
 import charts
-from data import (SHAPE_TO_GOV, corr, describe_r, districts_for, drill_table,
-                  filter_towns, load_geojson, load_towns)
-from theme import CSS, html
+from data import SHAPE_TO_GOV, districts_for, filter_towns, level_of, load_geojson, load_towns, units_table
 
-st.set_page_config(page_title="Lebanon Education Atlas", layout="wide", initial_sidebar_state="collapsed")
-st.markdown(CSS, unsafe_allow_html=True)
+st.set_page_config(page_title="Education in Lebanese towns", layout="wide")
 
 towns, audit = load_towns()
 geojson = load_geojson()
+CFG = {"displayModeBar": False}
 
-# ------------------------------------------------------------ reference numbers
-gov_stats = towns.groupby("governorate").agg(illit=("illiterate", "mean"), schools=("schools", "mean"), n=("town", "count"))
-hi, lo = gov_stats["illit"].idxmax(), gov_stats["illit"].idxmin()
-ratio = gov_stats.loc[hi, "illit"] / gov_stats.loc[lo, "illit"]
-nat_illit = towns["illiterate"].mean()
-nat_schools = towns["schools"].mean()
+# ------------------------------------------------------------------ sidebar filters
+st.sidebar.header("Filters")
+gov_sel = st.sidebar.multiselect("Governorate", sorted(towns["governorate"].unique()), key="gov",
+                                 placeholder="All governorates")
 
-dist_stats = towns.groupby("district").agg(illit=("illiterate", "mean"), schools=("schools", "mean"), n=("town", "count"))
-dist_stats = dist_stats[dist_stats["n"] >= 5]
-r_gov = gov_stats["illit"].corr(gov_stats["schools"])
-r_dist = dist_stats["illit"].corr(dist_stats["schools"])
-r_town = corr(towns["schools"], towns["illiterate"])
-
-
-def plural(n: int, word: str) -> str:
-    return f"{n} {word}{'' if n == 1 else 's'}"
-
-
-def signed(x: float) -> str:
-    return f"{x:+.2f}".replace("-", "−")
-
-
-# ------------------------------------------------------------------------- hero
-st.markdown(html(f"""
-<div class="hero">
-<div class="eyebrow">Lebanon &middot; Education &middot; Town-level data, 2023</div>
-<h1>Same country. <em>{ratio:.1f}&times;</em> the illiteracy.</h1>
-<p>Adult illiteracy in {hi} is {ratio:.1f} times the rate in {lo}. The obvious explanation is that some regions
-simply have fewer schools. This page tests that idea town by town, and the answer depends on how closely you look.</p>
-</div>
-"""), unsafe_allow_html=True)
-
-# ---------------------------------------------------------------------- filters
-st.markdown('<div class="section">Explore</div>', unsafe_allow_html=True)
-st.markdown('<div class="helper">Choose one or more governorates, then narrow to districts inside them. '
-            'Every chart and number below follows your selection. Leave both empty to see all of Lebanon.</div>',
-            unsafe_allow_html=True)
-
-f1, f2, f3 = st.columns([1.1, 1.1, 1])
-with f1:
-    gov_sel = st.multiselect("Governorate", sorted(towns["governorate"].unique()), key="gov",
-                             placeholder="All governorates")
-
-# Linked control: the district list depends on the governorates chosen. Districts picked earlier
-# that no longer belong to the new scope are dropped, so the two widgets can never contradict each other.
+# The district list depends on the governorates chosen. Districts picked earlier that no longer
+# belong to the new selection are dropped, so the two filters can never contradict each other.
 dist_options = districts_for(towns, gov_sel)
 st.session_state["dist"] = [d for d in st.session_state.get("dist", []) if d in dist_options]
-with f2:
-    dist_sel = st.multiselect("District", dist_options, key="dist",
-                              placeholder="All districts" + (" in selection" if gov_sel else ""))
+dist_sel = st.sidebar.multiselect("District", dist_options, key="dist", placeholder="All districts")
+st.sidebar.caption("The district list follows the governorates you pick. "
+                   "Leave both empty to see all of Lebanon.")
 
 sel = filter_towns(towns, gov_sel, dist_sel)
-level_word = "town" if dist_sel else "district" if gov_sel else "governorate"
-with f3:
-    st.markdown(html(f"""
-    <div class="tile-label" style="margin-top:.35rem">Viewing</div>
-    <div style="color:#f4f3ee;font-size:1.05rem;margin-top:.15rem">{len(sel):,} of {len(towns):,} towns</div>
-    <div class="tile-sub">Ranking drills down to <b>{level_word}s</b></div>
-    """), unsafe_allow_html=True)
+level = level_of(gov_sel, dist_sel)
+units = units_table(sel, level)
+units_all_towns = units_table(sel, "town") if level == "town" else units   # the scatter shows every town
 
-# -------------------------------------------------------------------------- KPIs
-sel_illit = sel["illiterate"].mean()
-sel_schools = sel["schools"].mean()
-r_sel = corr(sel["schools"], sel["illiterate"])
-diff = sel_illit - nat_illit
-delta = "Lebanon-wide average" if abs(diff) < 0.05 else f"{'&#9650;' if diff > 0 else '&#9660;'} {abs(diff):.1f} pts vs. Lebanon ({nat_illit:.1f}%)"
+# ------------------------------------------------------------------------- heading
+st.title("Education in Lebanese towns and villages")
+st.write("How schooling differs between governorates and districts, based on figures reported by "
+         "municipalities for 2023. Use the filters on the left to narrow the view. "
+         "Every number and chart on this page follows your selection.")
 
-k = st.columns(4)
-tiles = [
-    ("Towns in view", f"{len(sel):,}", "", f"{plural(sel['governorate'].nunique(), 'governorate')} \u00b7 {plural(sel['district'].nunique(), 'district')}"),
-    ("Avg. illiteracy", f"{sel_illit:.1f}", "%", delta),
-    ("Schools per town", f"{sel_schools:.1f}", "", f"Lebanon average: {nat_schools:.1f}"),
-    ("Schools vs. illiteracy", "n/a" if np.isnan(r_sel) else f"r = {signed(r_sel)}", "", describe_r(r_sel, len(sel))),
-]
-for col, (label, value, unit, sub) in zip(k, tiles):
-    col.markdown(html(f"""
-    <div class="tile"><div class="tile-label">{label}</div>
-    <div class="tile-value">{value}<small>{unit}</small></div>
-    <div class="tile-sub">{sub}</div></div>
-    """), unsafe_allow_html=True)
 
-CFG = {"displayModeBar": False}
-st.write("")
+# ---------------------------------------------------------------------------- KPIs
+def average(col: str) -> float:
+    return float(sel[col].mean())
 
-# ------------------------------------------------------------- map + ranked bars
-c1, c2 = st.columns([5, 7], gap="large")
-with c1:
-    st.markdown('<div class="chart-title">Where illiteracy concentrates</div>'
-                '<div class="chart-note">Average % illiterate by governorate, for the towns in view. Grey = outside your selection.</div>',
-                unsafe_allow_html=True)
+
+def delta(col: str):
+    if len(sel) == len(towns):
+        return None
+    return f"{average(col) - towns[col].mean():+.1f} points vs. all towns"
+
+
+k1, k2, k3, k4 = st.columns(4)
+k1.metric("Towns in view", f"{len(sel):,}")
+k2.metric("Illiterate residents (average town)", f"{average('illiterate'):.1f}%", delta("illiterate"), delta_color="inverse")
+k3.metric("School dropout (average town)", f"{average('dropout'):.1f}%", delta("dropout"), delta_color="inverse")
+k4.metric("Towns with a university", f"{int((sel['universities'] > 0).sum())} of {len(sel)}")
+
+# ------------------------------------------------------------------- map and ranking
+unit_word = level
+st.subheader("Where illiteracy is highest")
+left, right = st.columns([5, 6], gap="large")
+with left:
+    st.markdown("**Average share of illiterate residents, by governorate**")
+    st.caption("Each figure is the average of its towns. Grey areas are outside your selection.")
     st.plotly_chart(charts.map_fig(sel, geojson, SHAPE_TO_GOV), width="stretch", config=CFG)
+with right:
+    title = "Towns with the highest illiteracy" if level == "town" else f"Average share of illiterate residents, by {unit_word}"
+    st.markdown(f"**{title}**")
+    st.caption(f"Showing the {charts.TOP_N} highest of {len(units)} towns." if level == "town" and len(units) > charts.TOP_N
+               else "The number of towns behind each average is shown in brackets.")
+    st.plotly_chart(charts.ranking_fig(units, level), width="stretch", config=CFG)
 
-table, level, total = drill_table(sel, gov_sel, dist_sel)
+# ---------------------------------------------------------------- dropout and schools
+st.subheader("Dropout and schools")
+c1, c2 = st.columns(2, gap="large")
+with c1:
+    st.markdown(f"**Illiteracy and school dropout, by {unit_word}**")
+    st.caption(f"Each dot is one {unit_word}. Hover over a dot for its name and figures.")
+    st.plotly_chart(charts.dropout_fig(units_all_towns, level), width="stretch", config=CFG)
 with c2:
-    title = {"governorate": "Illiteracy by governorate", "district": "Illiteracy by district", "town": "Highest-illiteracy towns"}[level]
-    note = ("Whiskers show the standard error; <b>n</b> is the number of towns behind each average."
-            if level != "town" else f"Showing the {len(table)} highest of {total} towns in the selected districts.")
-    st.markdown(f'<div class="chart-title">{title}</div><div class="chart-note">{note}</div>', unsafe_allow_html=True)
-    st.plotly_chart(charts.bar_fig(table, level), width="stretch", config=CFG)
+    st.markdown("**Public and private schools**")
+    st.caption("Same order as the ranking above, highest illiteracy first.")
+    st.plotly_chart(charts.schools_fig(units, level), width="stretch", config=CFG)
 
-# ----------------------------------------------------------------------- scatter
-st.markdown('<div class="section">Do schools explain it?</div>', unsafe_allow_html=True)
-s1, s2 = st.columns([8, 4], gap="large")
-with s1:
-    st.markdown('<div class="chart-title">Schools vs. illiteracy, every town</div>'
-                '<div class="chart-note">Your selection in blue; all other towns stay visible in grey for context. '
-                'A small horizontal jitter separates towns with identical school counts.</div>', unsafe_allow_html=True)
-    st.plotly_chart(charts.scatter_fig(towns, sel), width="stretch", config=CFG)
-with s2:
-    if np.isnan(r_sel):
-        headline, body = "n/a", "Select a larger area: correlation needs at least 8 towns with varying school counts."
-    else:
-        headline = f"r = {signed(r_sel)}"
-        direction = ("Towns with more schools tend to have <i>higher</i> illiteracy." if r_sel > 0.1
-                     else "Towns with more schools tend to have <i>lower</i> illiteracy." if r_sel < -0.1
-                     else "Knowing how many schools a town has tells you almost nothing about its illiteracy rate.")
-        body = f"Across the {len(sel):,} towns in view there is {describe_r(r_sel, len(sel))}. {direction}"
-    st.markdown(html(f"""
-    <div class="reading"><div class="tile-label">Reading your selection</div>
-    <div class="r">{headline}</div><p>{body}</p>
-    <p style="color:#8d8c85;font-size:.85rem">r runs from &minus;1 to +1; values near 0 mean no linear relationship.</p></div>
-    """), unsafe_allow_html=True)
+if level == "town":
+    st.subheader("Towns in the selected districts")
+    table = units_all_towns.rename(columns={
+        "label": "Town", "context": "District", "illiterate": "Illiterate (%)", "dropout": "Dropout (%)",
+        "university": "University (%)", "public": "Public schools", "private": "Private schools",
+        "universities": "Universities"}).drop(columns="n")
+    st.dataframe(table, hide_index=True, width="stretch")
 
-# ---------------------------------------------------------------------- insights
-st.markdown('<div class="section">What the data says</div>', unsafe_allow_html=True)
-i1, i2 = st.columns(2, gap="large")
-i1.markdown(html(f"""
-<div class="card accent"><h4>A gap that survives the uncertainty</h4>
-<div class="big">{ratio:.1f}&times;</div>
-<p>{hi} averages {gov_stats.loc[hi, 'illit']:.1f}% illiteracy ({gov_stats.loc[hi, 'n']} towns); {lo} averages
-{gov_stats.loc[lo, 'illit']:.1f}% ({gov_stats.loc[lo, 'n']} towns). The whiskers on the ranking chart show that even
-{hi}'s smaller sample leaves it clearly above {lo}, so the gap is not a sampling accident.</p></div>
-"""), unsafe_allow_html=True)
-i2.markdown(html(f"""
-<div class="card accent"><h4>The finer you look, the weaker the link gets</h4>
-<p>Correlation between schools and illiteracy, at three levels of detail:</p>
-<p><b>Governorates</b> (7): <b>{signed(r_gov)}</b> &nbsp;&middot;&nbsp; <b>Districts</b> ({len(dist_stats)}): <b>{signed(r_dist)}</b>
-&nbsp;&middot;&nbsp; <b>Towns</b> ({len(towns):,}): <b>{signed(r_town)}</b></p>
-<p>Regions with more illiteracy tend to have more schools per town. That is a settlement effect (many small
-villages, each needing its own school), not evidence that schools cause illiteracy. Use the filters to watch it dissolve.</p></div>
-"""), unsafe_allow_html=True)
+# -------------------------------------------------------------------- what stands out
+g = towns.groupby("governorate").agg(
+    n=("town", "count"), illit=("illiterate", "mean"), median=("illiterate", "median"),
+    drop=("dropout", "mean"), univ=("university", "mean"),
+    schools=("schools", "mean"), has_univ=("universities", lambda s: int((s > 0).sum())))
+g["high"] = towns.assign(h=towns["illiterate"] >= 10).groupby("governorate")["h"].mean() * 100
+w1, w2 = list(g["illit"].nlargest(2).index)
+best = g["illit"].idxmin()
+same_two = set(g["drop"].nlargest(2).index) == {w1, w2} == set(g["univ"].nsmallest(2).index)
+n_univ = int((towns["universities"] > 0).sum())
 
-# ---------------------------------------------------------------- design notes
-st.markdown('<div class="section">Design notes</div>', unsafe_allow_html=True)
-with st.expander("Governorate selector: why a multiselect"):
+st.subheader("What stands out")
+st.markdown(
+    f"**Illiteracy is concentrated in a few governorates.** In the average {w1} town, {g.loc[w1, 'illit']:.1f}% of residents "
+    f"are illiterate, against {g.loc[best, 'illit']:.1f}% in the average {best} town. The typical town looks alike everywhere "
+    f"(median {g['median'].min():.0f} to {g['median'].max():.0f}%). What differs is how common high-illiteracy towns are: "
+    f"{g.loc[w1, 'high']:.0f}% of towns in {w1} and {g.loc[w2, 'high']:.0f}% in {w2} report at least 10% illiterate residents, "
+    f"compared with {g.loc[best, 'high']:.0f}% in {best}.")
+if same_two:
+    st.markdown(
+        f"**The same governorates trail on other measures.** {w1} and {w2} also report the highest school dropout "
+        f"({g.loc[w1, 'drop']:.1f}% and {g.loc[w2, 'drop']:.1f}%) and the smallest share of residents with a university education "
+        f"({g.loc[w1, 'univ']:.1f}% and {g.loc[w2, 'univ']:.1f}%). {best} reports {g.loc[best, 'drop']:.1f}% dropout "
+        f"and {g.loc[best, 'univ']:.1f}% with a university education.")
+st.markdown(
+    f"**The number of schools does not explain the gap.** {w1} has {g.loc[w1, 'schools']:.1f} schools per town on average and "
+    f"{w2} has {g.loc[w2, 'schools']:.1f}, more than {best} ({g.loc[best, 'schools']:.1f}). Universities are rare everywhere: "
+    f"only {n_univ} of {len(towns)} towns have one, and only {g.loc['Akkar', 'has_univ']} of Akkar's {int(g.loc['Akkar', 'n'])} towns. "
+    "Counting schools says nothing about class size, distance or quality.")
+
+# ------------------------------------------------------------------- design notes
+st.subheader("Design notes")
+with st.expander("Governorate filter"):
     st.markdown("""
-**Question it answers.** *Is the pattern national, or driven by a few regions?* Reading two regions side by side
-(say Baalbek-Hermel against Mount Lebanon) is the comparison that reveals the gap.
+**Question it answers.** Is the pattern the same across regions, or is it driven by one or two governorates?
 
-**Why this widget.** A single-choice dropdown or radio group forces one region at a time, so the reader has to remember
-one chart while looking at the next. Seven checkboxes would take a permanent block of the page. A multiselect
-holds any number of regions in one compact control, and an empty selection means "all of Lebanon", so the page opens on
-the national picture. Clicking the map was tempting but is imprecise and not keyboard accessible.
+**Why a multiselect.** A reader often wants to compare regions, for example Akkar with Mount Lebanon. A single-choice
+dropdown or a radio button only allows one region at a time. Seven checkboxes would take a lot of space, and clicking the
+map is imprecise and cannot be done with a keyboard. Leaving the filter empty shows all of Lebanon, so the page opens on the
+national picture.
 
-**Course concept: focusing attention while keeping context.** Choosing regions highlights them in colour on the map and
-scatter, while everything else fades to grey instead of disappearing. The reader focuses without losing the reference frame.
+**Course concept: focusing attention.** The map, the figures at the top and every chart narrow to the chosen governorates,
+and the rest of the map turns grey. The reader sees only what they asked about, with the national average still shown
+next to the numbers for context.
 """)
-with st.expander("District selector: why a dependent multiselect"):
+with st.expander("District filter"):
     st.markdown("""
-**Question it answers.** *Inside a region, is the gap spread evenly or concentrated in a few districts?* It also lets
-the reader test whether the schools-and-illiteracy relationship survives at a finer grain.
+**Question it answers.** Within a governorate, is illiteracy spread across all districts or concentrated in a few?
 
-**Why this widget.** A slider suits numbers, not named places, and a free-text box makes people guess spellings.
-The district list is *linked*: it shows only districts inside the chosen governorates, so at most a handful of options
-appear instead of all 25, and impossible combinations (Tyre inside Akkar) cannot be built. Picking districts then
-drills the ranking chart one level further, down to individual towns.
+**Why a dependent multiselect.** The district list only shows districts inside the chosen governorates, so a reader sees
+a handful of options instead of all 25 and cannot build a combination that does not exist, such as a Tyre district inside
+Akkar. I considered one long list of every district, which is harder to scan and allows those contradictions, and a slider,
+which does not suit named places. Choosing districts also takes the charts one step further down, to individual towns.
 
-**Course concept: reducing clutter through progressive disclosure.** The reader gets the overview first (governorates),
-then zooms (districts), then details (towns), and never faces more than the next step's worth of choices.
+**Course concept: reducing clutter.** The page starts with the overview (governorates), moves to districts when a
+governorate is chosen, and shows individual towns only when a district is chosen. At each step the reader sees only as much
+detail as they asked for.
 """)
 
-# ------------------------------------------------------------------------ about
-st.markdown('<div class="section">About the data</div>', unsafe_allow_html=True)
-st.markdown(html(f"""
-<div class="foot"><b>Source.</b> AUB linked-data portal (PKGCubes Publisher), datasets <i>Educational_Level-Lebanon-2023</i> and
-<i>Educational_Resources-Lebanon-2023</i>, originally published by Impact Open Data (impact.cib.gov.lb) and joined on town.
-Each row is one town; percentages describe residents' highest education level.<br>
-<b>Cleaning.</b> Of {audit['raw']:,} towns, {audit['no_data']} had no attainment figures, {audit['bad_sum']} reported shares that do not
-sum to roughly 100% (one summed to 13,200%), and {audit['missing_illiteracy']} lacked an illiteracy value. {audit['final']:,} towns remain.<br>
-<b>Limits.</b> A single-year snapshot. Averages are unweighted by population (town populations are not in the data).
-Beirut has no towns in the source. Boundary shapes are from geoBoundaries and carry no data.</div>
-"""), unsafe_allow_html=True)
+# ---------------------------------------------------------------------- about the data
+st.subheader("About the data")
+st.markdown(f"""
+- **Source.** AUB linked-data portal (PKGCubes Publisher): the datasets *Educational_Level-Lebanon-2023* and
+  *Educational_Resources-Lebanon-2023*, joined by town. They come from the Rural Development module of the IMPACT platform run by
+  Lebanon's Central Inspection, which collects town and village indicators directly from municipalities.
+- **Estimates.** Because municipalities report the figures, they are approximate: {audit['round5']:.0%} of the reported percentages are
+  multiples of 5.
+- **Averages.** Governorate and district figures are simple averages of their towns. They are not weighted by population,
+  because town populations are not in the data, and a few towns with very high values pull averages up.
+- **Cleaning.** Of {audit['raw']:,} towns, {audit['no_data']} had no education figures and {audit['bad_sum']} reported shares that do not
+  add up to roughly 100%. {audit['missing_illiteracy']} more had no illiteracy value. {audit['final']:,} towns remain.
+- **Not covered.** Beirut has no towns in the data, and the figures are for one year (2023). Boundary shapes come from geoBoundaries.
+""")
