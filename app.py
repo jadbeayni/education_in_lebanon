@@ -88,6 +88,13 @@ if level == "town":
     st.dataframe(table, hide_index=True, width="stretch")
 
 # -------------------------------------------------------------------- what stands out
+def clearly_higher(a: str, b: str, col: str = "illiterate") -> bool:
+    """True when governorate a's town average is above b's by more than ~2 standard errors."""
+    x, y = towns.loc[towns["governorate"] == a, col].dropna(), towns.loc[towns["governorate"] == b, col].dropna()
+    se = (x.var() / len(x) + y.var() / len(y)) ** 0.5
+    return (x.mean() - y.mean()) / se > 2
+
+
 g = towns.groupby("governorate").agg(
     n=("town", "count"), illit=("illiterate", "mean"), median=("illiterate", "median"),
     drop=("dropout", "mean"), univ=("university", "mean"),
@@ -104,7 +111,9 @@ st.markdown(
     f"are illiterate, against {g.loc[best, 'illit']:.1f}% in the average {best} town. The typical town looks alike everywhere "
     f"(median {g['median'].min():.0f} to {g['median'].max():.0f}%). What differs is how common high-illiteracy towns are: "
     f"{g.loc[w1, 'high']:.0f}% of towns in {w1} and {g.loc[w2, 'high']:.0f}% in {w2} report at least 10% illiterate residents, "
-    f"compared with {g.loc[best, 'high']:.0f}% in {best}.")
+    f"compared with {g.loc[best, 'high']:.0f}% in {best}."
+    + ("" if clearly_higher(w1, w2) else f" The difference between {w1} and {w2} is within the margin of error, so treat them as a pair.")
+    + (f" Both are clearly above {best}." if clearly_higher(w1, best) and clearly_higher(w2, best) else ""))
 if same_two:
     st.markdown(
         f"**The same governorates trail on other measures.** {w1} and {w2} also report the highest school dropout "
@@ -157,6 +166,7 @@ st.markdown(f"""
 - **Averages.** Governorate and district figures are simple averages of their towns. They are not weighted by population,
   because town populations are not in the data, and a few towns with very high values pull averages up.
 - **Cleaning.** Of {audit['raw']:,} towns, {audit['no_data']} had no education figures and {audit['bad_sum']} reported shares that do not
-  add up to roughly 100%. {audit['missing_illiteracy']} more had no illiteracy value. {audit['final']:,} towns remain.
+  add up to roughly 100%. {audit['missing_illiteracy']} more had no illiteracy value. {audit['final']:,} towns remain. Loosening this rule, or
+  capping extreme values at 30%, does not change the order of the governorates.
 - **Not covered.** Beirut has no towns in the data, and the figures are for one year (2023). Boundary shapes come from geoBoundaries.
 """)
