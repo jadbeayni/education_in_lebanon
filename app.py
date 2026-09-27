@@ -43,14 +43,17 @@ def average(col: str) -> float:
 def delta(col: str):
     if len(sel) == len(towns):
         return None
-    return f"{average(col) - towns[col].mean():+.1f} points vs. all towns"
+    return f"{average(col) - towns[col].mean():+.1f} vs. Lebanon"
 
 
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Towns in view", f"{len(sel):,}")
-k2.metric("Illiterate residents (average town)", f"{average('illiterate'):.1f}%", delta("illiterate"), delta_color="inverse")
-k3.metric("School dropout (average town)", f"{average('dropout'):.1f}%", delta("dropout"), delta_color="inverse")
-k4.metric("Towns with a university", f"{int((sel['universities'] > 0).sum())} of {len(sel)}")
+k2.metric("Illiteracy", f"{average('illiterate'):.1f}%", delta("illiterate"), delta_color="inverse",
+          help="Average share of illiterate residents, across towns in view")
+k3.metric("School dropout", f"{average('dropout'):.1f}%", delta("dropout"), delta_color="inverse",
+          help="Average share of residents who dropped out of school, across towns in view")
+k4.metric("Have a university", f"{int((sel['universities'] > 0).sum())}/{len(sel)}",
+          help="Number of towns in view that have at least one university, out of all towns in view")
 
 # ------------------------------------------------------------------- map and ranking
 unit_word = level

@@ -3,7 +3,9 @@
 A Streamlit dashboard for the MSBA325 assignment. It shows how illiteracy, school dropout, schools and
 universities differ between Lebanon's governorates, districts and towns.
 
-**Live app:** _add the Streamlit Community Cloud link here after deploying_
+**Live app:** https://educationinlebanon-auczamhmgiu674ark2ko6b.streamlit.app
+
+**Repository:** https://github.com/jadbeayni/education_in_lebanon
 
 ## How it works
 - Two linked filters in the sidebar. Choose governorates and the district list narrows to districts inside them;
